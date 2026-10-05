@@ -1,0 +1,14 @@
+# Secrets: never commit your keys
+.env
+
+# Python environment and caches
+.venv/
+__pycache__/
+*.pyc
+
+# Downloaded city data and the database (rebuilt by the data scripts)
+data/*.duckdb
+data/raw/
+
+# Mac clutter
+.DS_Store

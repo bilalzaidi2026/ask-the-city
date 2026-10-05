@@ -1,0 +1,3 @@
+anthropic>=0.40      # Claude API client (the agent's brain)
+python-dotenv>=1.0   # loads API keys from the .env file
+requests>=2.31       # calls the NYC Open Data API
