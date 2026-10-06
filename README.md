@@ -4,7 +4,7 @@ Ask any question about New York City. An AI agent finds the right open data,
 writes and runs its own analysis, catches its own mistakes, and answers with a
 chart, the caveats, and the exact code it used.
 
-Status: Step 0 (setup).
+Status: Step 1 (city data).
 
 ## Run it locally
 
@@ -15,3 +15,14 @@ pip install -r requirements.txt
 cp .env.example .env      # then add your keys
 python hello_city.py
 ```
+
+## Get the city data
+
+```bash
+python data/download.py --sample   # quick test: last 3 months of 311
+python data/build_db.py            # builds data/city.duckdb
+python data/check_db.py            # a first look at the data
+```
+
+For the full history, run `python data/download.py` (no --sample) once. It takes a while.
+
