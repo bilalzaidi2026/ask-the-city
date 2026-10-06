@@ -4,7 +4,7 @@ Ask any question about New York City. An AI agent finds the right open data,
 writes and runs its own analysis, catches its own mistakes, and answers with a
 chart, the caveats, and the exact code it used.
 
-Status: Step 2 (agent core).
+Status: Step 3 (checker and tests).
 
 ## Run it locally
 
@@ -30,4 +30,11 @@ For the full history, run `python data/download.py` (no --sample) once. It takes
 
 ```bash
 python ask.py "Which borough has the most rat complaints per resident?"
+```
+
+## Run the tests
+
+```bash
+python tests/run_tests.py                # all test questions (about $0.50)
+python tests/run_tests.py --no-checker   # same, without the checker, to compare
 ```
