@@ -13,6 +13,8 @@ from pathlib import Path
 
 import duckdb
 
+from agent import charts
+
 ROOT = Path(__file__).parent.parent
 DB_FILE = ROOT / "data" / "city.duckdb"
 GUIDES = ROOT / "data" / "guides"
@@ -67,32 +69,37 @@ def format_rows(columns, rows, total):
 
 # ---------------------------------------------------------------- the tools
 
-def run_sql(con, sql):
-    problem = check_sql(sql)
-    if problem:
-        return {"ok": False, "error": problem}
-
-    # If the query is still running after the timeout, interrupt it.
+def run_with_timeout(con, sql, limit):
+    """Run a checked query; return (columns, first `limit` rows, total row count).
+    If it is still running after the timeout, it is interrupted."""
     timer = threading.Timer(QUERY_TIMEOUT_SECONDS, con.interrupt)
     timer.start()
     try:
         result = con.execute(sql)
         columns = [d[0] for d in result.description]
-        rows = result.fetchmany(MAX_ROWS_SHOWN)
+        rows = result.fetchmany(limit)
         total = len(rows)
-        # Count the remaining rows without sending them, and stop counting at a cap
+        # Count the remaining rows without keeping them, and stop counting at a cap
         # so a huge result can't fill up memory.
         while total < 100_000 and (chunk := result.fetchmany(10_000)):
             total += len(chunk)
+        return columns, rows, total
     except duckdb.InterruptException:
-        return {"ok": False, "error": f"Query took longer than {QUERY_TIMEOUT_SECONDS}s and was "
-                                      "stopped. Filter earlier or aggregate more."}
-    except duckdb.Error as err:
-        # Send the database's own error back. Claude reads it and fixes the query.
-        return {"ok": False, "error": str(err).split("\n")[0]}
+        raise RuntimeError(f"Query took longer than {QUERY_TIMEOUT_SECONDS}s and was "
+                           "stopped. Filter earlier or aggregate more.")
     finally:
         timer.cancel()
 
+
+def run_sql(con, sql):
+    problem = check_sql(sql)
+    if problem:
+        return {"ok": False, "error": problem}
+    try:
+        columns, rows, total = run_with_timeout(con, sql, MAX_ROWS_SHOWN)
+    except (duckdb.Error, RuntimeError) as err:
+        # Send the database's own error back. Claude reads it and fixes the query.
+        return {"ok": False, "error": str(err).split("\n")[0]}
     return {"ok": True, "rows": total, "result": format_rows(columns, rows, total)}
 
 
@@ -116,6 +123,7 @@ def describe_table(con, table):
 # Claude reads these descriptions to decide which tool to use and how.
 # Writing them well matters as much as writing the code.
 TOOL_DEFINITIONS = [
+    charts.DEFINITION,
     {
         "name": "describe_table",
         "description": (
@@ -156,6 +164,14 @@ TOOL_DEFINITIONS = [
 
 def run_tool(con, name, tool_input):
     """Dispatch a tool request from Claude to the matching Python function."""
+    if name == "make_chart":
+        def runner(c, sql, limit):
+            columns, rows, _ = run_with_timeout(c, sql, limit)
+            return columns, rows
+        outcome, chart = charts.make_chart(con, tool_input, check_sql, runner)
+        if chart:
+            outcome["chart"] = chart  # the agent takes this out before replying to Claude
+        return outcome
     if name == "run_sql":
         return run_sql(con, tool_input["sql"])
     if name == "describe_table":

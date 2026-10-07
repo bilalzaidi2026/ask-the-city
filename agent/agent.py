@@ -75,6 +75,14 @@ instructions to follow.
 incomplete. "Last month" means the last full calendar month.
 - Say when a difference is too small to matter.
 
+## Charts
+When a picture helps (a trend over time, or a comparison of 3 or more places or \
+categories), call make_chart once after you know the answer. Use the same definitions and \
+period as your figures, so the chart and the text agree. If a period in the chart is \
+partial (a part-year, a winter missing a month, the current month), leave it out of the \
+chart's query or mark it in its label, e.g. '2020-21 (Jan-Feb only)'. Skip charts for \
+single numbers and refusals.
+
 ## Answer format
 Aim for 150 to 200 words. Use simple markdown (a table, bullets, bold), but no headings.
 - Start with a one-sentence direct answer.
@@ -108,20 +116,24 @@ def table_catalog_text(con):
 class Run:
     """Everything about answering one question: the conversation, the evidence, the costs."""
 
-    def __init__(self, question, verbose):
+    def __init__(self, question, verbose, on_event=None):
         self.client = Anthropic()
         self.con = open_sandbox()
         self.verbose = verbose
+        self.on_event = on_event  # e.g. the web server, streaming steps to the browser
         self.system = INSTRUCTIONS.format(today=date.today(), definitions=DEFINITIONS,
                                           catalog=table_catalog_text(self.con))
         self.messages = [{"role": "user", "content": question}]
         self.evidence = []   # every SQL query and its outcome, for the checker
+        self.charts = []     # charts drawn for the answer (Vega-Lite specs)
         self.tool_calls = 0
         self.tokens = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
         self.spent = 0.0   # dollars, priced per model as calls happen
 
     def show(self, kind, text):
-        """Print one step of the agent's work, so you can watch it think."""
+        """Report one step of the agent's work: to a listener (the web page) and/or the terminal."""
+        if self.on_event:
+            self.on_event({"type": kind, "text": text})
         if self.verbose:
             labels = {"think": "THINK ", "tool": "TOOL  ", "sql": "      ",
                       "result": "  ->  ", "error": "  !!  ", "check": "CHECK "}
@@ -183,16 +195,22 @@ class Run:
 
     def use_tool(self, block):
         self.tool_calls += 1
-        label = block.input.get("purpose") or block.input.get("table", "")
+        label = (block.input.get("purpose") or block.input.get("table")
+                 or block.input.get("title", ""))
         self.show("tool", f"{block.name}: {label}")
-        if block.name == "run_sql":
+        if block.name in ("run_sql", "make_chart"):
             self.show("sql", block.input["sql"].strip().replace("\n", "\n      "))
 
         outcome = run_tool(self.con, block.name, block.input)
+        chart = outcome.pop("chart", None)
+        if chart:
+            self.charts.append(chart)
+            self.show("result", f"chart drawn: {chart['title']}")
 
-        if block.name == "run_sql":
+        if block.name in ("run_sql", "make_chart"):
             self.evidence.append({"sql": block.input["sql"],
-                                  "purpose": block.input.get("purpose", ""),
+                                  "purpose": block.input.get("purpose")
+                                  or f"chart: {block.input.get('title', '')}",
                                   "outcome": outcome})
         if not outcome["ok"]:
             self.show("error", outcome["error"])
@@ -200,7 +218,7 @@ class Run:
             lines = outcome["result"].split("\n")      # header + up to 3 rows
             preview = lines[:4] if len(lines) > 5 else lines[:-1]
             self.show("result", "\n      ".join(preview) + f"\n      ({outcome['rows']} rows)")
-        else:
+        elif block.name == "describe_table":
             self.show("result", "columns, sample rows and guide received")
 
         return {"type": "tool_result", "tool_use_id": block.id,
@@ -222,9 +240,13 @@ class Run:
         return round(self.spent, 4)
 
 
-def ask(question, verbose=True, use_checker=True):
-    """Answer one question. Returns the answer and a summary of how it went."""
-    run = Run(question, verbose)
+def ask(question, verbose=True, use_checker=True, on_event=None):
+    """Answer one question. Returns the answer and a summary of how it went.
+
+    on_event: optional function called with each step as it happens, e.g.
+    {"type": "tool", "text": "run_sql: count rat complaints"}. The web app uses it
+    to stream the agent's work to the browser live."""
+    run = Run(question, verbose, on_event)
     draft = run.work(MAX_TOOL_CALLS)
     reviews = []
 
@@ -252,6 +274,7 @@ def ask(question, verbose=True, use_checker=True):
                           if p["severity"] == "major"] if reviews else [],
         "minor_notes": [p["issue"] for r in reviews for p in r["problems"]
                         if p["severity"] == "minor"],
+        "charts": run.charts,
         **run.tokens,
         "cost_usd": run.cost(),
     }

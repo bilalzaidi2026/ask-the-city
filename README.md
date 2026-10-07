@@ -4,7 +4,7 @@ Ask any question about New York City. An AI agent finds the right open data,
 writes and runs its own analysis, catches its own mistakes, and answers with a
 chart, the caveats, and the exact code it used.
 
-Status: Step 3 (checker and tests).
+Status: Step 5 (web app).
 
 ## Run it locally
 
@@ -29,8 +29,19 @@ For the full history, run `python data/download.py` (no --sample) once. It takes
 ## Ask a question
 
 ```bash
-python ask.py "Which borough has the most rat complaints per resident?"
+python ask.py "How have heat complaints changed each winter since 2021?"
 ```
+
+The answer prints in the terminal and opens as a web page with its charts
+(saved to `answers/latest.html`). Add `--no-open` to skip opening the browser.
+
+## Run the web app
+
+```bash
+python -m uvicorn web.server:app --port 8000
+```
+
+Then open http://localhost:8000. Ask a question and watch each step stream in live.
 
 ## Run the tests
 

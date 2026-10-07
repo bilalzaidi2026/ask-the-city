@@ -28,6 +28,9 @@ without saying so, where that could change the conclusion.
 6. A close result presented as a clear winner, or a conclusion that would flip under another \
 reasonable definition that the answer doesn't mention.
 7. Helping identify or single out a private individual.
+8. A chart (its query appears in the evidence as "chart: ...") that uses a different \
+definition, filter or period from the figures in the text, so the picture and the words \
+disagree, or that shows a partial period as if it were complete.
 
 Do NOT flag:
 - Facts taken from the reference notes (they are trusted documentation).

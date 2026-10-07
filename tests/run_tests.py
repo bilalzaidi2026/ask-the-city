@@ -40,6 +40,12 @@ def grade(test, answer, stats):
             failures.append(f"should not say '{phrase}'")
     if "max_queries" in test and stats["queries"] > test["max_queries"]:
         failures.append(f"ran {stats['queries']} queries, expected at most {test['max_queries']}")
+    if "charts" in test:
+        drawn = len(stats.get("charts", []))
+        if test["charts"] and not drawn:
+            failures.append("expected a chart, none drawn")
+        if not test["charts"] and drawn:
+            failures.append(f"drew {drawn} chart(s) where none was wanted")
     if "truth_sql" in test:
         value = truth_value(test["truth_sql"])
         forms = {str(value).lower()}
@@ -67,7 +73,7 @@ def main():
         except Exception as err:  # record it and move on to the next question
             print(f"  ERROR: {err}")
             answer = f"ERROR: {err}"
-            stats = {"queries": 0, "revised": False, "final_check": "skipped",
+            stats = {"queries": 0, "revised": False, "final_check": "skipped", "charts": [],
                      "open_problems": [], "minor_notes": [], "cost_usd": 0.0}
         seconds = time.time() - started
         failures = grade(test, answer, stats)
@@ -87,9 +93,10 @@ def main():
 
     passed = sum(ok for _, ok, _, _ in rows)
     total_cost = sum(s["cost_usd"] for _, _, s, _ in rows)
-    print(f"\n{'test':<18}{'result':<8}{'queries':>8}{'revised':>9}{'secs':>6}{'cost':>8}")
+    print(f"\n{'test':<18}{'result':<8}{'queries':>8}{'charts':>7}{'revised':>9}{'secs':>6}{'cost':>8}")
     for test_id, ok, stats, seconds in rows:
         print(f"{test_id:<18}{'pass' if ok else 'FAIL':<8}{stats['queries']:>8}"
+              f"{len(stats.get('charts', [])):>7}"
               f"{'yes' if stats['revised'] else '':>9}{seconds:>6.0f}{stats['cost_usd']:>8.3f}")
     checker = f"checker on ({CHECKER_MODEL})" if use_checker else "checker off"
     print(f"\n{passed}/{len(rows)} passed · total ${total_cost:.2f} · {checker}")

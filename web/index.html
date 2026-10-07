@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask the City</title>
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/vega.min.js"></script>
+<script src="/vendor/vega-lite.min.js"></script>
+<script src="/vendor/vega-embed.min.js"></script>
+<style>
+  /* Layout: question bar on top; below it the answer (wide) beside a live "watch it work" log. */
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #14161a; --muted: #5a5d63; --line: #e3e1da;
+    --accent: #2a78d6; --accent-ink: #ffffff; --soft: #eef3fb; --ok: #1f7a4d; --warn: #9a5b00;
+    --code: #f1f0ec;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121417; --surface: #1a1d21; --ink: #ecedef; --muted: #a3a7ae; --line: #2c3036;
+      --accent: #5a9bea; --accent-ink: #0b0d10; --soft: #1c2735; --ok: #5cc28f; --warn: #e3a64a;
+      --code: #22262c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { margin-bottom: 20px; }
+  .kicker { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.05; margin: 8px 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); max-width: 64ch; margin: 0; }
+
+  form { display: flex; gap: 10px; margin: 24px 0 12px; flex-wrap: wrap; }
+  label.sr { position: absolute; left: -9999px; }
+  input#q { flex: 1 1 420px; min-width: 0; font: inherit; padding: 14px 16px; border-radius: 10px;
+            border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  input#q:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.ask { font: 600 16px var(--sans); padding: 14px 24px; border: 0; border-radius: 10px;
+               background: var(--accent); color: var(--accent-ink); cursor: pointer; min-height: 48px; }
+  button.ask:disabled { opacity: .55; cursor: progress; }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+  .examples button { font: 14px var(--sans); padding: 8px 12px; border-radius: 999px; cursor: pointer;
+                     border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-height: 36px; }
+  .examples button:hover { border-color: var(--accent); }
+
+  .grid { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; min-width: 0; }
+  #answerCard { flex: 999 1 560px; }
+  #logCard { flex: 1 1 320px; max-height: 80vh; overflow: auto; }
+  .card h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  .empty { color: var(--muted); }
+
+  #answer h1, #answer h2, #answer h3 { font-size: 18px; margin: 18px 0 6px; }
+  #answer table { border-collapse: collapse; margin: 12px 0; font-variant-numeric: tabular-nums; display: block; overflow-x: auto; }
+  #answer th, #answer td { border-bottom: 1px solid var(--line); padding: 6px 14px 6px 0; text-align: left; }
+  #answer p:first-child { font-size: 19px; font-weight: 600; line-height: 1.4; }
+  .chart-title { font-size: 15px; line-height: 1.35; margin: 28px 0 6px; }
+  .chart { width: 100%; margin: 0 0 8px; }
+  details.sql { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5 var(--mono); background: var(--code);
+        padding: 10px 12px; border-radius: 8px; margin: 6px 0; color: var(--ink); }
+  .stats { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .badge { display: inline-block; font: 600 12px var(--sans); padding: 2px 8px; border-radius: 999px; }
+  .badge.ok { color: var(--ok); border: 1px solid currentColor; }
+  .badge.warn { color: var(--warn); border: 1px solid currentColor; }
+
+  ol#log { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  #log li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  #log .label { font: 600 11px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: block; }
+  #log .tool .label { color: var(--accent); }
+  #log .error .label, #log .fatal .label { color: var(--warn); }
+  #log .check .label { color: var(--ok); }
+  #log pre { font-size: 11.5px; max-height: 160px; overflow: auto; }
+  .working { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+             margin-right: 8px; animation: pulse 1s infinite alternate; }
+  @keyframes pulse { from { opacity: .25; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .working { animation: none; } }
+  footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">NYC open data · AI analyst</div>
+    <h1>Ask the City</h1>
+    <p class="sub">Ask anything about 311 complaints, restaurant inspections or neighborhoods. An AI agent
+      finds the data, writes and runs its own queries, checks its work, and shows you exactly how it got the answer.</p>
+  </header>
+
+  <form id="form">
+    <label class="sr" for="q">Your question</label>
+    <input id="q" name="q" maxlength="300" autocomplete="off"
+           placeholder="e.g. Which borough has the most rat complaints per resident?">
+    <button class="ask" id="askBtn" type="submit">Ask</button>
+  </form>
+  <div class="examples" id="examples">
+    <button type="button">How have heat complaints changed each winter since 2021?</button>
+    <button type="button">Which borough has the most rat complaints per resident?</button>
+    <button type="button">When during the night do noise complaints peak?</button>
+    <button type="button">How many Manhattan restaurants currently have a C grade?</button>
+    <button type="button">Are rat complaints going up or down lately?</button>
+  </div>
+
+  <div class="grid">
+    <section class="card" id="answerCard" aria-live="polite">
+      <h2>Answer</h2>
+      <div id="answer"><p class="empty">Ask a question, or pick an example above.</p></div>
+      <div id="charts"></div>
+      <div id="extras"></div>
+    </section>
+    <aside class="card" id="logCard">
+      <h2>Watch it work</h2>
+      <ol id="log"><li class="empty">Each step the agent takes will appear here as it happens.</li></ol>
+    </aside>
+  </div>
+
+  <footer>Data: NYC Open Data (311 Service Requests, DOHMH Restaurant Inspections) and the US Census
+    Bureau. Answers describe what people reported to the city, not everything that happened.</footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LABELS = { think: "Thinking", tool: "Step", sql: "Query", result: "Result",
+                 error: "Error, fixing", check: "Review", fatal: "Problem" };
+const dark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+function esc(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function addStep(event) {
+  const li = document.createElement("li");
+  li.className = event.type;
+  const body = ["sql", "result"].includes(event.type)
+    ? `<pre>${esc(event.text)}</pre>` : `<span>${esc(event.text)}</span>`;
+  li.innerHTML = `<span class="label">${LABELS[event.type] || event.type}</span>${body}`;
+  $("log").appendChild(li);
+  $("logCard").scrollTop = $("logCard").scrollHeight;
+}
+
+function themed(spec) {
+  // Charts come with light-theme text colors; swap them for the dark theme.
+  if (!dark()) return spec;
+  const s = structuredClone(spec);
+  Object.assign(s.config.axis, { labelColor: "#a3a7ae", titleColor: "#a3a7ae", gridColor: "#2c3036", tickColor: "#2c3036" });
+  s.config.legend = { labelColor: "#a3a7ae" };
+  return s;
+}
+
+function showAnswer(event) {
+  $("answer").innerHTML = marked.parse(event.answer || "(no answer)");
+  $("charts").innerHTML = "";
+  event.charts.forEach((chart, i) => {
+    const title = document.createElement("h3");
+    title.className = "chart-title"; title.textContent = chart.title;
+    const div = document.createElement("div");
+    div.className = "chart"; div.id = "chart" + i;
+    $("charts").append(title, div);
+    vegaEmbed("#chart" + i, themed(chart.spec), { actions: false });
+  });
+  const s = event.stats;
+  const badge = s.checker === "pass"
+    ? `<span class="badge ok">Reviewed${s.revised ? " and corrected" : ""}</span>`
+    : `<span class="badge warn">Reviewer has concerns</span>`;
+  const sql = event.charts.map((c) => `<p>${esc(c.title)}</p><pre>${esc(c.sql)}</pre>`).join("");
+  $("extras").innerHTML =
+    (sql ? `<details class="sql"><summary>Show the SQL behind the charts</summary>${sql}</details>` : "") +
+    `<div class="stats">${badge} · ${s.tool_calls} steps · ${s.seconds}s · about $${s.cost_usd.toFixed(3)}</div>`;
+}
+
+async function askQuestion(question) {
+  $("askBtn").disabled = true;
+  $("answer").innerHTML = `<p class="empty"><span class="working"></span>Working on it <span id="timer">0s</span>. Follow the steps as they happen.</p>`;
+  const started = Date.now();
+  const tick = setInterval(() => { const t = $("timer"); if (t) t.textContent = Math.round((Date.now() - started) / 1000) + "s"; }, 1000);
+  $("charts").innerHTML = ""; $("extras").innerHTML = ""; $("log").innerHTML = "";
+  try {
+    const response = await fetch("/api/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    if (!response.ok) throw new Error((await response.json()).detail?.[0]?.msg || response.statusText);
+    // Read the stream: events arrive as "data: {...}" blocks separated by a blank line.
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop();
+      for (const block of blocks) {
+        if (!block.startsWith("data: ")) continue;  // skip keep-alive comments
+        const event = JSON.parse(block.slice(6));
+        if (event.type === "answer") showAnswer(event);
+        else { addStep(event); if (event.type === "fatal") $("answer").innerHTML = `<p>${esc(event.text)}</p>`; }
+      }
+    }
+  } catch (err) {
+    $("answer").innerHTML = `<p>Sorry, that didn't work: ${esc(err.message)}</p>`;
+  } finally {
+    clearInterval(tick);
+    $("askBtn").disabled = false;
+  }
+}
+
+$("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("q").value.trim();
+  if (q.length >= 3) askQuestion(q);
+});
+$("examples").addEventListener("click", (e) => {
+  if (e.target.tagName !== "BUTTON") return;
+  $("q").value = e.target.textContent;
+  askQuestion(e.target.textContent);
+});
+</script>
+</body>
+</html>
