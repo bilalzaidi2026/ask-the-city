@@ -173,6 +173,9 @@ def census(year, geography, extra=""):
     params = {"get": "B01003_001E", "for": geography}
     if extra:
         params["in"] = extra
+    # The Census API now requires a free key: https://api.census.gov/data/key_signup.html
+    if os.getenv("CENSUS_API_KEY"):
+        params["key"] = os.environ["CENSUS_API_KEY"]
     response = get_with_retry(url, params)
     try:
         return response.json()  # list of rows; the first row is the header
@@ -216,6 +219,9 @@ def download_population():
         return
 
     # Census unreachable: keep going with official 2020 borough counts, and no zip data.
+    if not os.getenv("CENSUS_API_KEY"):
+        print("  No CENSUS_API_KEY in .env. Get a free key at "
+              "https://api.census.gov/data/key_signup.html")
     print("  Census API unavailable. Using official 2020 Census counts for boroughs;")
     print("  zip-level population is skipped. Re-run later with: "
           "python data/download.py --population-only")

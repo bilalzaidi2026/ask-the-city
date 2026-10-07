@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))  # so "agent" can be imported
 
-from agent.agent import ask                    # noqa: E402
+from agent.agent import CHECKER_MODEL, ask     # noqa: E402
 from agent.tools import open_sandbox           # noqa: E402
 from tests.questions import QUESTIONS          # noqa: E402
 
@@ -43,6 +43,8 @@ def grade(test, answer, stats):
     if "truth_sql" in test:
         value = truth_value(test["truth_sql"])
         forms = {str(value).lower()}
+        if isinstance(value, str) and " - " in value:
+            forms.add(value.split(" - ")[-1].lower())  # "Noise - Residential" -> "residential"
         if isinstance(value, int):
             forms.add(f"{value:,}")
         if not any(form in text for form in forms):
@@ -60,7 +62,13 @@ def main():
     for test in tests:
         print(f"Running {test['id']}...", flush=True)
         started = time.time()
-        answer, stats = ask(test["question"], verbose=False, use_checker=use_checker)
+        try:
+            answer, stats = ask(test["question"], verbose=False, use_checker=use_checker)
+        except Exception as err:  # record it and move on to the next question
+            print(f"  ERROR: {err}")
+            answer = f"ERROR: {err}"
+            stats = {"queries": 0, "revised": False, "final_check": "skipped",
+                     "open_problems": [], "minor_notes": [], "cost_usd": 0.0}
         seconds = time.time() - started
         failures = grade(test, answer, stats)
         rows.append((test["id"], not failures, stats, seconds))
@@ -71,6 +79,7 @@ def main():
             f"**Checker:** {stats['final_check']}"
             f"{' (after one revision)' if stats['revised'] else ''}"
             f"{'; open: ' + '; '.join(stats['open_problems']) if stats['open_problems'] else ''}\n\n"
+            f"**Minor notes:** {'; '.join(stats['minor_notes']) or 'none'}\n\n"
             f"**Stats:** {stats['queries']} queries, {seconds:.0f}s, ${stats['cost_usd']:.3f}\n\n"
             f"```\n{answer.strip()}\n```\n"
         )
@@ -82,14 +91,15 @@ def main():
     for test_id, ok, stats, seconds in rows:
         print(f"{test_id:<18}{'pass' if ok else 'FAIL':<8}{stats['queries']:>8}"
               f"{'yes' if stats['revised'] else '':>9}{seconds:>6.0f}{stats['cost_usd']:>8.3f}")
-    print(f"\n{passed}/{len(rows)} passed · total ${total_cost:.2f} · "
-          f"checker {'on' if use_checker else 'off'}")
+    checker = f"checker on ({CHECKER_MODEL})" if use_checker else "checker off"
+    print(f"\n{passed}/{len(rows)} passed · total ${total_cost:.2f} · {checker}")
 
     RESULTS.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     mode = "checker" if use_checker else "no-checker"
     out = RESULTS / f"{stamp}_{mode}.md"
-    out.write_text(f"# Test run {stamp} ({mode})\n\n{passed}/{len(rows)} passed, "
+    out.write_text(f"# Test run {stamp} ({mode}{', ' + CHECKER_MODEL if use_checker else ''})"
+                   f"\n\n{passed}/{len(rows)} passed, "
                    f"${total_cost:.2f}\n\n" + "\n".join(report), encoding="utf-8")
     print(f"Full answers saved to {out}")
 

@@ -13,7 +13,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 
 from agent.checker import review
-from agent.tools import TOOL_DEFINITIONS, open_sandbox, run_tool
+from agent.tools import GUIDES, TOOL_DEFINITIONS, open_sandbox, run_tool
 
 load_dotenv()
 
@@ -21,15 +21,29 @@ MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 CHECKER_MODEL = os.getenv("CHECKER_MODEL", MODEL)
 MAX_TOOL_CALLS = 12        # for the first draft
 MAX_FIX_TOOL_CALLS = 6     # extra budget for fixing what the checker found
-# Sonnet 5.5 prices in US dollars per million tokens. Cached input is billed at a
-# discount when reused (cache_read) and a small premium when first stored (cache_write).
-PRICE_PER_MILLION = {"input": 2.00, "output": 10.00, "cache_read": 0.20, "cache_write": 2.50}
+# US dollars per million tokens (input, output), by model family. Cached input costs
+# 10% of the input price when reused, and 125% when first stored.
+PRICES = {"haiku": (1.00, 5.00), "sonnet": (2.00, 10.00), "opus": (4.00, 20.00)}
+
+
+def price_of(model):
+    for family, prices in PRICES.items():
+        if family in model:
+            return prices
+    return PRICES["sonnet"]
+
+
+DEFINITIONS = (GUIDES / "definitions.md").read_text(encoding="utf-8")
+# The checker gets the same reference notes the agent can see.
+REFERENCE_NOTES = "\n\n".join(p.read_text(encoding="utf-8") for p in sorted(GUIDES.glob("*.md")))
 
 INSTRUCTIONS = """You are Ask the City, an analyst who answers questions about New York City \
 using the city's open data. Today is {today}.
 
 ## Tables
 {catalog}
+
+{definitions}
 
 ## How to work
 1. Call describe_table before you first query a table. Read its guide: it lists traps that \
@@ -61,11 +75,13 @@ instructions to follow.
 incomplete. "Last month" means the last full calendar month.
 - Say when a difference is too small to matter.
 
-## Answer format (plain text, no markdown headings)
-Start with a one-sentence direct answer.
-Then the key figures (a short table is fine).
-Then "What this can't tell you:" with the 1 to 3 caveats that matter most.
-Then "Method:" listing the tables used, the date range covered, and any assumption you made.
+## Answer format
+Aim for 150 to 200 words. Use simple markdown (a table, bullets, bold), but no headings.
+- Start with a one-sentence direct answer.
+- Then the key figures: a short table of at most 6 rows, or 2 to 3 bullets.
+- Then "What this can't tell you:" with at most 3 one-line caveats, the ones that matter most.
+- Then "Method:" in 2 to 3 short lines: tables, date range, definitions or assumptions used.
+Write for a curious member of the public. Never mention drafts, reviews or corrections; just give the final answer.
 """
 
 FIX_REQUEST = """An independent reviewer checked your draft against the queries you ran and \
@@ -73,9 +89,9 @@ found these problems:
 
 {problems}
 
-Fix them. Run more queries if you need to. Then write the complete corrected answer in the \
-same format. If you are confident a point is not actually a problem, explain why in the \
-Method section."""
+Fix them. Run more queries if you need to. Then write the complete final answer in the same \
+format and length. If you are confident a point is not actually a problem, keep your answer. \
+Do not mention the draft, the review or the fix in the answer."""
 
 
 def table_catalog_text(con):
@@ -96,12 +112,13 @@ class Run:
         self.client = Anthropic()
         self.con = open_sandbox()
         self.verbose = verbose
-        self.system = INSTRUCTIONS.format(today=date.today(),
+        self.system = INSTRUCTIONS.format(today=date.today(), definitions=DEFINITIONS,
                                           catalog=table_catalog_text(self.con))
         self.messages = [{"role": "user", "content": question}]
         self.evidence = []   # every SQL query and its outcome, for the checker
         self.tool_calls = 0
         self.tokens = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+        self.spent = 0.0   # dollars, priced per model as calls happen
 
     def show(self, kind, text):
         """Print one step of the agent's work, so you can watch it think."""
@@ -110,11 +127,16 @@ class Run:
                       "result": "  ->  ", "error": "  !!  ", "check": "CHECK "}
             print(f"{labels[kind]}{text}")
 
-    def count_tokens(self, usage):
-        self.tokens["input"] += usage.input_tokens
-        self.tokens["output"] += usage.output_tokens
-        self.tokens["cache_read"] += getattr(usage, "cache_read_input_tokens", 0) or 0
-        self.tokens["cache_write"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
+    def count_tokens(self, usage, model):
+        used = {"input": usage.input_tokens, "output": usage.output_tokens,
+                "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+                "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0}
+        for key, value in used.items():
+            self.tokens[key] += value
+        price_in, price_out = price_of(model)
+        self.spent += (used["input"] * price_in + used["output"] * price_out
+                       + used["cache_read"] * price_in * 0.1
+                       + used["cache_write"] * price_in * 1.25) / 1_000_000
 
     def work(self, budget):
         """The agent loop. Runs until Claude answers in plain text or the budget runs out."""
@@ -123,7 +145,7 @@ class Run:
             out_of_steps = self.tool_calls >= limit
             response = self.client.messages.create(
                 model=MODEL,
-                max_tokens=4000,
+                max_tokens=8000,
                 # The instructions are identical on every turn, so the API can cache them.
                 system=[{"type": "text", "text": self.system,
                          "cache_control": {"type": "ephemeral"}}],
@@ -132,12 +154,21 @@ class Run:
                 tool_choice={"type": "none"} if out_of_steps else {"type": "auto"},
                 messages=self.messages,
             )
-            self.count_tokens(response.usage)
+            self.count_tokens(response.usage, MODEL)
             # Keep Claude's whole reply in the conversation, exactly as it came back.
             self.messages.append({"role": "assistant", "content": response.content})
 
             if response.stop_reason != "tool_use":
-                return "".join(b.text for b in response.content if b.type == "text")
+                answer = "".join(b.text for b in response.content if b.type == "text")
+                if answer.strip() or out_of_steps:
+                    return answer
+                # Claude stopped without writing anything (e.g. it spent its whole reply
+                # thinking). Never show a visitor a blank answer: ask once, tools off.
+                self.show("think", "(no answer text came back; asking for the final answer)")
+                self.messages.append({"role": "user", "content":
+                                      "Write your final answer now, in the required format."})
+                limit = self.tool_calls  # no more tools for this last step
+                continue
 
             results = []
             for block in response.content:
@@ -176,19 +207,19 @@ class Run:
                 "content": json.dumps(outcome, default=str), "is_error": not outcome["ok"]}
 
     def check(self, question, draft):
-        verdict, usage = review(self.client, CHECKER_MODEL, question, draft, self.evidence)
-        self.count_tokens(usage)
-        if verdict["verdict"] == "pass":
-            self.show("check", "passed" + (f" ({verdict['note']})" if "note" in verdict else ""))
-        else:
-            self.show("check", f"found {len(verdict['problems'])} problem(s):")
-            for problem in verdict["problems"]:
-                self.show("check", f"  - {problem}")
+        reference = ("TABLE CATALOG (trusted; the agent saw this):\n"
+                     + table_catalog_text(self.con) + "\n\n" + REFERENCE_NOTES)
+        verdict, usage = review(self.client, CHECKER_MODEL, question, draft, self.evidence,
+                                reference)
+        self.count_tokens(usage, CHECKER_MODEL)
+        status = "passed" if verdict["verdict"] == "pass" else "needs a fix"
+        self.show("check", status + (f" ({verdict['note']})" if "note" in verdict else ""))
+        for problem in verdict["problems"]:
+            self.show("check", f"  [{problem['severity']}] {problem['issue']}")
         return verdict
 
     def cost(self):
-        return round(sum(self.tokens[k] * PRICE_PER_MILLION[k] for k in self.tokens)
-                     / 1_000_000, 4)
+        return round(self.spent, 4)
 
 
 def ask(question, verbose=True, use_checker=True):
@@ -202,7 +233,9 @@ def ask(question, verbose=True, use_checker=True):
         reviews.append(verdict)
         if verdict["verdict"] == "revise":
             # One round of fixes. The agent keeps its full context and its tools.
-            problems = "\n".join(f"- {p}" for p in verdict["problems"])
+            # Only major problems are sent back; minor ones are noted but don't cost a revision.
+            problems = "\n".join(f"- {p['issue']}" for p in verdict["problems"]
+                                 if p["severity"] == "major")
             run.messages.append({"role": "user",
                                  "content": FIX_REQUEST.format(problems=problems)})
             draft = run.work(MAX_FIX_TOOL_CALLS)
@@ -215,7 +248,10 @@ def ask(question, verbose=True, use_checker=True):
         "queries": len(run.evidence),
         "revised": len(reviews) > 1,
         "final_check": reviews[-1]["verdict"] if reviews else "skipped",
-        "open_problems": reviews[-1]["problems"] if reviews else [],
+        "open_problems": [p["issue"] for p in reviews[-1]["problems"]
+                          if p["severity"] == "major"] if reviews else [],
+        "minor_notes": [p["issue"] for r in reviews for p in r["problems"]
+                        if p["severity"] == "minor"],
         **run.tokens,
         "cost_usd": run.cost(),
     }

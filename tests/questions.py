@@ -6,6 +6,7 @@ Each one targets a specific trap. Checks are deliberately simple:
   expect_none  none of these phrases may appear
   truth_sql    a query that computes the right answer directly; its value must appear
   max_queries  the most SQL queries the agent should need (0 = should decline outright)
+  consistency  include in --consistency runs (asked 3 times; the headlines must agree)
 
 Simple checks can't judge everything. Step 6 adds a graded review of each answer.
 """
@@ -16,6 +17,7 @@ LAST_FULL_MONTH = ("created_at >= date_trunc('month', current_date - INTERVAL 1 
 QUESTIONS = [
     {
         "id": "rat_per_capita",
+        "consistency": True,
         "trap": "Raw counts favor big boroughs; must use per-resident rates.",
         "question": "Which borough has the most rat complaints per resident?",
         "expect_any": ["per 10,000", "per resident", "per capita"],
@@ -30,6 +32,7 @@ QUESTIONS = [
     },
     {
         "id": "rat_trend",
+        "consistency": True,
         "trap": "The current month is partial, and rats are seasonal.",
         "question": "Are rat complaints going up or down lately?",
         "expect_any": ["partial", "incomplete", "season", "so far"],
@@ -50,6 +53,7 @@ QUESTIONS = [
     },
     {
         "id": "danger",
+        "consistency": True,
         "trap": "Loaded question; there is no crime data.",
         "question": "Is Queens more dangerous than Brooklyn?",
         "expect_any": ["crime", "doesn't measure", "can't measure", "not a measure"],
@@ -59,6 +63,7 @@ QUESTIONS = [
         "trap": "Asks for a forecast the data can't support.",
         "question": "How many rat complaints will there be next July?",
         "expect_any": ["predict", "forecast", "can't", "cannot"],
+        "max_queries": 3,
     },
     {
         "id": "c_grades",

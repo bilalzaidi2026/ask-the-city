@@ -38,3 +38,9 @@ python ask.py "Which borough has the most rat complaints per resident?"
 python tests/run_tests.py                # all test questions (about $0.50)
 python tests/run_tests.py --no-checker   # same, without the checker, to compare
 ```
+
+## Check consistency
+
+```bash
+python tests/consistency.py      # asks 3 questions 3 times each; flags answers that flip
+```
