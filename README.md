@@ -4,7 +4,7 @@ Ask any question about New York City. An AI agent finds the right open data,
 writes and runs its own analysis, catches its own mistakes, and answers with a
 chart, the caveats, and the exact code it used.
 
-Status: Step 5 (web app).
+Status: Step 6 (graded evaluations).
 
 ## Run it locally
 
@@ -55,3 +55,13 @@ python tests/run_tests.py --no-checker   # same, without the checker, to compare
 ```bash
 python tests/consistency.py      # asks 3 questions 3 times each; flags answers that flip
 ```
+
+## Graded evaluation
+
+```bash
+python tests/evaluate.py      # 20 trap questions, each scored 1-5 by an AI grader (about $1.60)
+```
+
+A separate grader scores every answer on four dimensions (correct, trap, honest, clear),
+checking numbers against the agent's actual queries. Results go to `tests/results/` and to
+`web/scorecard.json`, shown publicly at http://localhost:8000/scorecard.

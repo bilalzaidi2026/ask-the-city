@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask the City · How it's tested</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #14161a; --muted: #5a5d63; --line: #e3e1da;
+    --accent: #2a78d6; --ok: #1f7a4d; --warn: #9a5b00; --bar: #2a78d6; --track: #ecebe6;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121417; --surface: #1a1d21; --ink: #ecedef; --muted: #a3a7ae; --line: #2c3036;
+            --accent: #5a9bea; --ok: #5cc28f; --warn: #e3a64a; --bar: #5a9bea; --track: #2a2e34; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }
+  a { color: var(--accent); }
+  .kicker { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.1; margin: 8px 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); max-width: 68ch; margin: 0 0 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px; margin-bottom: 28px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .tile .n { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .l { font-size: 13px; color: var(--muted); }
+  .meter { height: 6px; background: var(--track); border-radius: 3px; margin-top: 8px; }
+  .meter span { display: block; height: 6px; background: var(--bar); border-radius: 3px; }
+  h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 28px 0 10px; }
+  .box { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; text-align: center; }
+  .pass { color: var(--ok); font-weight: 600; } .fail { color: var(--warn); font-weight: 600; }
+  .trap { color: var(--muted); font-size: 13px; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  details p { margin: 6px 0; font-size: 13px; color: var(--muted); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+  dt { font-weight: 600; } dd { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker"><a href="/">Ask the City</a> · How it's tested</div>
+  <h1>Scorecard</h1>
+  <p class="sub" id="intro">Loading the latest evaluation...</p>
+  <div class="tiles" id="tiles"></div>
+
+  <h2>The rubric</h2>
+  <div class="box" style="padding:16px"><dl id="rubric"></dl></div>
+
+  <h2>Every test question</h2>
+  <div class="box">
+    <table>
+      <thead><tr><th>Question and the trap it tests</th><th>Result</th>
+        <th>Correct</th><th>Trap</th><th>Honest</th><th>Clear</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+fetch("/scorecard.json").then((r) => r.json()).then((s) => {
+  const when = new Date(s.run_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  document.getElementById("intro").textContent =
+    `Every change to the agent is tested on ${s.questions} questions, each built around a specific ` +
+    `trap. A separate AI grader scores every answer from 1 to 5 against the rubric below, checking ` +
+    `numbers against the agent's actual queries. Last run: ${when}.`;
+  const tile = (n, l, pct) => `<div class="tile"><div class="n">${n}</div><div class="l">${l}</div>` +
+    (pct != null ? `<div class="meter"><span style="width:${pct}%"></span></div>` : "") + `</div>`;
+  document.getElementById("tiles").innerHTML =
+    tile(`${s.passed}/${s.questions}`, "questions passed", 100 * s.passed / s.questions) +
+    Object.entries(s.averages).map(([d, v]) => tile(v.toFixed(2), `${d} (out of 5)`, 20 * v)).join("") +
+    tile(`$${s.cost_per_answer_usd.toFixed(2)}`, "average cost per answer");
+  document.getElementById("rubric").innerHTML =
+    Object.entries(s.rubric).map(([d, t]) => `<dt>${esc(d)}</dt><dd>${esc(t)}</dd>`).join("");
+  document.getElementById("rows").innerHTML = s.results.map((r) => {
+    const sc = (d) => `<td class="num">${r.scores[d] ?? "?"}</td>`;
+    const reasons = Object.entries(r.reasons).map(([d, t]) => `<p><b>${esc(d)}:</b> ${esc(t)}</p>`).join("");
+    return `<tr><td>${esc(r.question)}<div class="trap">${esc(r.trap)}</div>` +
+      `<details><summary>Grader's reasons</summary>${reasons}</details></td>` +
+      `<td class="${r.passed ? "pass" : "fail"}">${r.passed ? "Pass" : "Fail"}</td>` +
+      ["correct", "trap", "honest", "clear"].map(sc).join("") + `</tr>`;
+  }).join("");
+}).catch(() => { document.getElementById("intro").textContent = "No evaluation has been run yet."; });
+</script>
+</body>
+</html>

@@ -36,6 +36,18 @@ def home():
     return FileResponse(WEB / "index.html")
 
 
+@app.get("/scorecard")
+def scorecard_page():
+    return FileResponse(WEB / "scorecard.html")
+
+
+@app.get("/scorecard.json")
+def scorecard_data():
+    if not (WEB / "scorecard.json").exists():
+        raise HTTPException(404, "No evaluation has been run yet.")
+    return FileResponse(WEB / "scorecard.json")
+
+
 @app.post("/api/ask")
 async def ask_endpoint(body: Question):
     question = body.question.strip()

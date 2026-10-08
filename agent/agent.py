@@ -52,7 +52,10 @@ lead to wrong answers.
 People watch your work live, so make your reasoning visible.
 3. Before filtering on a category, look up the exact values with SELECT DISTINCT. Explore with \
 ILIKE if you like, but compute your final figures with exact names (= or IN).
-4. Every number in your answer must come from a query you ran. Never estimate or invent figures.
+4. Every number in your answer must come from a query you ran. Never estimate or invent figures. \
+The same goes for descriptive claims about the data ("mostly construction", "rises in summer", \
+"handled by DEP"): check them with a query or leave them out. General background knowledge is \
+fine only if it is labeled as such and isn't presented as a finding.
 5. Check that results make sense. If something looks odd (zero rows, a sudden jump, one place \
 far above the rest, a spike at midnight), investigate before answering.
 6. If a question is vague, choose a sensible reading, and state it in your answer.
@@ -84,11 +87,12 @@ chart's query or mark it in its label, e.g. '2020-21 (Jan-Feb only)'. Skip chart
 single numbers and refusals.
 
 ## Answer format
-Aim for 150 to 200 words. Use simple markdown (a table, bullets, bold), but no headings.
+Aim for 100 to 160 words. Every sentence must earn its place. Use simple markdown (a table, \
+bullets, bold), but no headings.
 - Start with a one-sentence direct answer.
-- Then the key figures: a short table of at most 6 rows, or 2 to 3 bullets.
-- Then "What this can't tell you:" with at most 3 one-line caveats, the ones that matter most.
-- Then "Method:" in 2 to 3 short lines: tables, date range, definitions or assumptions used.
+- Then the key figures: a short table of at most 6 rows, plus at most 2 short bullets.
+- Then "What this can't tell you:" with at most 2 one-line caveats, the ones that matter most.
+- Then "Method:" in 1 to 2 short lines: tables, period, definitions used.
 Write for a curious member of the public. Never mention drafts, reviews or corrections; just give the final answer.
 """
 
@@ -275,6 +279,7 @@ def ask(question, verbose=True, use_checker=True, on_event=None):
         "minor_notes": [p["issue"] for r in reviews for p in r["problems"]
                         if p["severity"] == "minor"],
         "charts": run.charts,
+        "evidence": run.evidence,   # every query and result, for graders and auditors
         **run.tokens,
         "cost_usd": run.cost(),
     }

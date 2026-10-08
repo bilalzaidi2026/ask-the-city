@@ -34,12 +34,27 @@ GUIDE_FOR_TABLE = {
 
 # ---------------------------------------------------------------- the sandbox
 
+_database = None
+_database_lock = threading.Lock()
+
+
 def open_sandbox():
-    """Open the database the only way the agent is allowed to: read-only, no files, no network."""
-    con = duckdb.connect(str(DB_FILE), read_only=True)        # layer 1: can't change data
-    con.execute("SET enable_external_access = false")         # layer 2: can't read/write files or the web
-    con.execute("SET lock_configuration = true")              # ...and can't switch that back on
-    return con
+    """Give one question its own cursor on the shared, locked-down database.
+
+    The database is opened once per program with its protections built in:
+      layer 1: read_only               can't change data
+      layer 2: enable_external_access  can't read or write files, or reach the web
+               lock_configuration      ...and no query can switch that back on
+    These settings belong to the whole database, so they can't be applied per
+    connection. (The first version tried, and crashed as soon as two questions
+    ran at the same time.) Each question gets a cursor: a separate connection to
+    the same protected database, safe to use in parallel."""
+    global _database
+    with _database_lock:
+        if _database is None:
+            _database = duckdb.connect(str(DB_FILE), read_only=True, config={
+                "enable_external_access": False, "lock_configuration": True})
+    return _database.cursor()
 
 
 def check_sql(sql):
